@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OneTopic Button</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #c8c8c8;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  }
+
+  .scene {
+    position: relative;
+    /* drop shadow beneath to give 3D lifted look */
+    filter: drop-shadow(0px 18px 28px rgba(0,0,0,0.38)) drop-shadow(0px 6px 10px rgba(0,0,0,0.22));
+  }
+
+  canvas {
+    display: block;
+    border-radius: 52px;
+    cursor: pointer;
+  }
+
+  .btn-label {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 34px;
+    font-weight: 400;
+    color: #2e2e30;
+    letter-spacing: -0.2px;
+    pointer-events: none;
+    z-index: 10;
+    user-select: none;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="scene">
+  <canvas id="rippleCanvas" width="420" height="116"></canvas>
+  <span class="btn-label">OneTopic</span>
+</div>
+
+<script>
+const canvas = document.getElementById('rippleCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+
+const COLS = W;
+const ROWS = H;
+const damping = 0.9875;
+
+let current  = new Float32Array(COLS * ROWS);
+let previous = new Float32Array(COLS * ROWS);
+let imageData = ctx.createImageData(W, H);
+
+function idx(x, y) { return y * COLS + x; }
+
+function addDrop(cx, cy, radius, strength) {
+  const r = Math.ceil(radius);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < radius) {
+        const px = Math.round(cx + dx);
+        const py = Math.round(cy + dy);
+        if (px >= 1 && px < COLS-1 && py >= 1 && py < ROWS-1) {
+          current[idx(px, py)] += strength * Math.cos((dist / radius) * Math.PI * 0.5);
+        }
+      }
+    }
+  }
+}
+
+// ── Ambient spawner ──
+let ambientTimer = 0;
+function spawnAmbient() {
+  const margin = 22;
+  const x = margin + Math.random() * (W - margin * 2);
+  const y = margin + Math.random() * (H - margin * 2);
+  addDrop(x, y, 4 + Math.random() * 5, 20 + Math.random() * 15);
+}
+
+// ── Mouse ──
+let mouseX = -1, mouseY = -1, lastMouseX = -1, lastMouseY = -1;
+let mouseRippleTimer = 0;
+
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - r.left) * (W / r.width);
+  mouseY = (e.clientY - r.top)  * (H / r.height);
+});
+canvas.addEventListener('mouseleave', () => {
+  mouseX = mouseY = lastMouseX = lastMouseY = -1;
+});
+canvas.addEventListener('click', e => {
+  const r = canvas.getBoundingClientRect();
+  const cx = (e.clientX - r.left) * (W / r.width);
+  const cy = (e.clientY - r.top)  * (H / r.height);
+  addDrop(cx, cy, 22, 420);
+  setTimeout(() => addDrop(cx, cy, 13, -210), 80);
+  setTimeout(() => addDrop(cx, cy, 9,  160), 180);
+});
+
+// ── Physics ──
+function update() {
+  for (let y = 1; y < ROWS-1; y++) {
+    for (let x = 1; x < COLS-1; x++) {
+      const i = idx(x, y);
+      current[i] = (
+        previous[idx(x-1,y)] + previous[idx(x+1,y)] +
+        previous[idx(x,y-1)] + previous[idx(x,y+1)]
+      ) * 0.5 - current[i];
+      current[i] *= damping;
+    }
+  }
+  const tmp = previous; previous = current; current = tmp;
+}
+
+// ── Base color: warm medium gray with 3D top-lit gradient ──
+// Precompute base lookup for speed
+const baseCache = new Float32Array(W * H);
+(function buildCache() {
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dx = x / W;
+      const dy = y / H;
+
+      // Main body: warm gray ~185
+      let base = 182;
+
+      // Large diffuse top highlight (the broad bright area upper-center)
+      const topGlow = Math.max(0, 1 - Math.sqrt((dx - 0.42)**2 + (dy - 0.05)**2) * 1.6);
+      base += topGlow * 52;
+
+      // Concentrated top-left specular gloss spot
+      const gloss1 = Math.max(0, 1 - Math.sqrt((dx - 0.13)**2 + (dy - 0.14)**2) * 5.5);
+      base += gloss1 * 58;
+
+      // Secondary soft highlight upper-left side
+      const gloss2 = Math.max(0, 1 - Math.sqrt((dx - 0.06)**2 + (dy - 0.42)**2) * 6.0);
+      base += gloss2 * 22;
+
+      // Edge rim brightening (glass-like edge catch)
+      const edgeDist = Math.min(dx, 1-dx, dy*1.5, (1-dy)*1.5);
+      const rim = Math.max(0, 1 - edgeDist * 14);
+      base += rim * 28;
+
+      // Bottom darkening — shadow side of the 3D pill
+      const bottomShade = Math.max(0, dy - 0.55) * 2.2;
+      base -= bottomShade * 38;
+
+      baseCache[y * W + x] = Math.min(255, Math.max(120, base));
+    }
+  }
+})();
+
+// ── Pill mask ──
+const rx = 52;
+const cx1 = rx, cx2 = W - rx, cy1 = rx, cy2 = H - rx;
+const maskCache = new Uint8Array(W * H);
+(function buildMask() {
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let inShape = false;
+      if (x >= cx1 && x <= cx2) {
+        inShape = true;
+      } else if (y >= cy1 && y <= cy2) {
+        inShape = true;
+      } else {
+        const nx = x < cx1 ? cx1 : cx2;
+        const ny = y < cy1 ? cy1 : cy2;
+        inShape = Math.sqrt((x-nx)**2 + (y-ny)**2) <= rx;
+      }
+      maskCache[y * W + x] = inShape ? 1 : 0;
+    }
+  }
+})();
+
+function render() {
+  const data = imageData.data;
+  const BG = 200; // background fill value
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+
+      if (!maskCache[y * W + x]) {
+        data[i] = data[i+1] = data[i+2] = BG; data[i+3] = 255;
+        continue;
+      }
+
+      const h = previous[idx(x, y)];
+      const hL = x > 0     ? previous[idx(x-1,y)] : h;
+      const hR = x < W-1   ? previous[idx(x+1,y)] : h;
+      const hU = y > 0     ? previous[idx(x,y-1)] : h;
+      const hD = y < H-1   ? previous[idx(x,y+1)] : h;
+
+      const nx = (hL - hR) * 0.38;
+      const ny = (hU - hD) * 0.38;
+
+      // Specular
+      const lx = -0.55, ly = -0.75, lz = 1.0;
+      const lLen = Math.sqrt(lx*lx + ly*ly + lz*lz);
+      const nLen = Math.sqrt(nx*nx + ny*ny + 1);
+      const dot  = Math.max(0, (nx*lx + ny*ly + 1.0) / (nLen * lLen));
+      const spec = Math.pow(dot, 45) * 190;
+
+      // Moderate refraction — enough to warp like liquid metal, not blow out color
+      const refScale = 2.8;
+      const rx2 = Math.min(W-1, Math.max(0, Math.round(x + nx * refScale)));
+      const ry2 = Math.min(H-1, Math.max(0, Math.round(y + ny * refScale)));
+      const base = baseCache[ry2 * W + rx2];
+
+      // Chromatic aberration — only at steep slopes, stays subtle
+      const slope = Math.sqrt(nx*nx + ny*ny);
+      const ca = Math.min(1, slope * 0.5) * 18; // max ~18 units of shift
+
+      const v = base + nx * 2 + spec;
+
+      // CA: warm orange on one edge, cool blue on other — anchored to gray
+      data[i]   = Math.min(255, Math.max(0, v + ca * 0.9));   // R slight warm
+      data[i+1] = Math.min(255, Math.max(0, v - ca * 0.1));   // G nearly neutral
+      data[i+2] = Math.min(255, Math.max(0, v - ca * 0.7));   // B slight cool
+      data[i+3] = 255;
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+
+  // ── Metal inner border with iridescence ──
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  const t = performance.now() / 4000;
+  const inset = 3.5, bw = 4.5;
+
+  const mg1 = ctx.createLinearGradient(0, 0, W * 0.6, H * 0.6);
+  mg1.addColorStop(0,   `hsla(${200+Math.sin(t)*20},   18%, 88%, 0.90)`);
+  mg1.addColorStop(0.2, `hsla(${215+Math.cos(t*1.3)*15},12%, 96%, 0.95)`);
+  mg1.addColorStop(0.5, `hsla(${190+Math.sin(t*0.7)*25},22%, 78%, 0.70)`);
+  mg1.addColorStop(0.8, `hsla(${210+Math.cos(t*1.1)*18},10%, 65%, 0.50)`);
+  mg1.addColorStop(1,   `hsla(${200+Math.sin(t*0.9)*12}, 8%, 55%, 0.30)`);
+  ctx.strokeStyle = mg1;
+  ctx.lineWidth = bw;
+  pillPath(ctx, inset, inset, W - inset*2, H - inset*2, rx - inset);
+  ctx.stroke();
+
+  const mg2 = ctx.createLinearGradient(W*0.4, H*0.4, W, H);
+  mg2.addColorStop(0,   `hsla(${160+Math.sin(t*1.2)*30},15%, 60%, 0.00)`);
+  mg2.addColorStop(0.4, `hsla(${175+Math.cos(t*0.8)*25},20%, 72%, 0.25)`);
+  mg2.addColorStop(0.7, `hsla(${195+Math.sin(t*1.5)*20},30%, 80%, 0.45)`);
+  mg2.addColorStop(1,   `hsla(${210+Math.cos(t)*15},    22%, 88%, 0.60)`);
+  ctx.strokeStyle = mg2;
+  ctx.lineWidth = bw;
+  pillPath(ctx, inset, inset, W - inset*2, H - inset*2, rx - inset);
+  ctx.stroke();
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.restore();
+
+  // ── Outer glass border ──
+  ctx.save();
+  const og = ctx.createLinearGradient(0, 0, W, H);
+  og.addColorStop(0,   'rgba(255,255,255,0.50)');
+  og.addColorStop(0.3, 'rgba(255,255,255,0.10)');
+  og.addColorStop(0.7, 'rgba(160,160,180,0.06)');
+  og.addColorStop(1,   'rgba(80,80,100,0.28)');
+  ctx.strokeStyle = og;
+  ctx.lineWidth = 2;
+  pillPath(ctx, 1.5, 1.5, W-3, H-3, rx - 1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function pillPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x+w, y,   x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h,   x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y,     x+r, y);
+  ctx.closePath();
+}
+
+let frame = 0;
+function loop() {
+  frame++;
+
+  ambientTimer++;
+  if (ambientTimer > 220 + Math.random() * 180) {
+    spawnAmbient();
+    ambientTimer = 0;
+  }
+
+  if (mouseX > 0 && mouseY > 0) {
+    mouseRippleTimer++;
+    if (mouseRippleTimer >= 9) {
+      if (lastMouseX > 0) {
+        const ddx = mouseX - lastMouseX;
+        const ddy = mouseY - lastMouseY;
+        const speed = Math.sqrt(ddx*ddx + ddy*ddy);
+        if (speed > 0.5) addDrop(mouseX, mouseY, 10 + speed * 0.6, 55 + speed * 2.5);
+      }
+      lastMouseX = mouseX; lastMouseY = mouseY;
+      mouseRippleTimer = 0;
+    }
+  }
+
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+setTimeout(() => addDrop(W * 0.4, H * 0.5, 8, 40), 400);
+setTimeout(() => addDrop(W * 0.65, H * 0.45, 6, 30), 1200);
+
+loop();
+</script>
+</body>
+</html>
