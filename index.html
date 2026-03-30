@@ -222,13 +222,13 @@ function render() {
       const ry2 = Math.min(H-1, Math.max(0, Math.round(y + ny * refScale)));
       const base = baseCache[ry2 * W + rx2];
 
-      // Chromatic aberration — only at steep slopes, stays subtle
+      // Chromatic aberration — only at steep slopes, stays subtle - quiet meowings
       const slope = Math.sqrt(nx*nx + ny*ny);
       const ca = Math.min(1, slope * 0.5) * 18; // max ~18 units of shift
 
       const v = base + nx * 2 + spec;
 
-      // CA: warm orange on one edge, cool blue on other — anchored to gray
+      // Anchor all the this shit to GREY. 
       data[i]   = Math.min(255, Math.max(0, v + ca * 0.9));   // R slight warm
       data[i+1] = Math.min(255, Math.max(0, v - ca * 0.1));   // G nearly neutral
       data[i+2] = Math.min(255, Math.max(0, v - ca * 0.7));   // B slight cool
@@ -238,7 +238,7 @@ function render() {
 
   ctx.putImageData(imageData, 0, 0);
 
-  // ── Metal inner border with iridescence ──
+  // Metal inner border with LESS iridescence and meowings and pawings. Go back to IridIUm  
   ctx.save();
   ctx.globalCompositeOperation = 'source-atop';
   const t = performance.now() / 4000;
